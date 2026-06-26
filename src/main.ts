@@ -14,7 +14,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: [
       "http://localhost:5173",
-      "https://figus-app-front-end-git-main-manuelsas-projects.vercel.app",
+       "https://figus-app-front-end-5w7u-4ah4hypxj-manuelsas-projects.vercel.app",
     ],
     credentials: true,
   });
