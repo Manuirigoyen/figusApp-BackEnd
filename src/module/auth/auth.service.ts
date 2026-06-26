@@ -1,27 +1,59 @@
-import { Controller, Post, Body, Res, HttpCode, HttpStatus } from '@nestjs/common';
-import { Response } from 'express'; 
-import { LoginUserDto } from '../users/dto/login-user.dto';
+import {
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 
-@Controller('auth')
-export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
 
-  @Post('login')
-  @HttpCode(HttpStatus.OK)
-  async login(
-    @Body() loginDto: LoginUserDto,
-    @Res({ passthrough: true }) response: Response, 
-  ) {
-    const result = await this.authService.login(loginDto);
-    const isProduction = process.env.NODE_ENV === 'production';
-    
-    response.cookie('access_token', result.access_token, {
-      httpOnly: true,
-      secure: true, 
-      sameSite: 'none', 
-      maxAge: 1000 * 60 * 60 * 24, 
-    });
-    
-    return { success: true };
+import { UsersService } from '../users/users.service';
+import { LoginUserDto } from './../users/dto/login-user.dto';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
+  ) {}
+
+  async login(credentials: LoginUserDto) {
+    const foundUser = await this.usersService.findByEmail(credentials.email);
+
+    if (!foundUser) {
+      throw new UnauthorizedException('Credenciales inválidas.');
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      credentials.password,
+      foundUser.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Credenciales inválidas.');
+    }
+
+    const payload = {
+      sub: foundUser.id,
+      email: foundUser.email,
+      role: foundUser.role,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload);
+
+    return {
+      access_token: accessToken,
+    };
+  }
+
+  async me(userId: number) {
+    const user = await this.usersService.findOne(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado.');
+    }
+
+    const { password, ...safeUser } = user as any;
+
+    return safeUser;
   }
 }
