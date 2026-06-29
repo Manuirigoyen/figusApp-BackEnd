@@ -14,7 +14,8 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: [
       "http://localhost:5173",
-       "https://figus-app-front-end-5w7u-4ah4hypxj-manuelsas-projects.vercel.app",
+      // Esto acepta "CUALQUIER" URL de Vercel que empiece con el nombre de proyecto
+      /^https:\/\/figus-app-front-end-.*\.vercel\.app$/,
     ],
     credentials: true,
   });
