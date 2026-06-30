@@ -16,12 +16,7 @@ async function bootstrap(): Promise<void> {
       "http://localhost:5173",
       // Dominio de producción fijo (no cambia entre deploys).
       "https://figus-app-front-end.vercel.app",
-      // Acepta cualquier deploy preview de tu proyecto en Vercel.
-      // Vercel trunca el nombre del proyecto en la URL si no entra en el
-      // límite de 63 caracteres del subdominio (por eso a veces queda
-      // "front-end" y a veces "front" a secas), así que el patrón es
-      // flexible justo ahí. El scope "manuelsas-projects" lo acota a tus
-      // propios deploys.
+      // Acepta cualquier deploy preview del proyecto en Vercel.
       /^https:\/\/figus-app-front[a-z0-9-]*-manuelsas-projects\.vercel\.app$/,
     ],
     credentials: true,
