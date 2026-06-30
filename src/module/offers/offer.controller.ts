@@ -40,6 +40,12 @@ export class OffersController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('my-history')
+  findMyHistory(@Req() req: any) {
+    return this.offersService.findMyHistory(this.getUserId(req));
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/accept')
   acceptOffer(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     return this.offersService.acceptOffer(id, this.getUserId(req));

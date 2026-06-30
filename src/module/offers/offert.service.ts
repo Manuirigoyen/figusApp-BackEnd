@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 
 import { Offer, OfferStatus, OfferType } from './entities/offer.entity';
 import { OfferRejection } from './entities/offer-rejection.entity';
@@ -31,6 +31,9 @@ export class OffersService {
 
     @InjectRepository(Sticker)
     private readonly stickerRepository: Repository<Sticker>,
+
+    @InjectRepository(Exchange)
+    private readonly exchangeRepository: Repository<Exchange>,
 
     private readonly dataSource: DataSource,
   ) {}
@@ -146,6 +149,103 @@ export class OffersService {
         offerWallet: offer.offerWallet,
         requestSticker: offer.requestSticker,
       }));
+  }
+
+  /**
+   * Historial de intercambios del usuario autenticado:
+   * - Ofertas que el usuario creó y siguen pendientes o ya fueron aceptadas.
+   * - Ofertas de otros usuarios que el usuario aceptó (reconstruidas desde Exchange).
+   * - Ofertas de otros usuarios que el usuario rechazó (vía OfferRejection).
+   *
+   * El rechazo es individual: no cambia el estado global de la oferta
+   * (sigue disponible para que otro usuario la acepte), pero igualmente
+   * queda registrado en el historial personal de quien la rechazó.
+   * No incluye eliminadas (se borran físicamente al hacer remove()).
+   */
+  async findMyHistory(userId: number): Promise<any[]> {
+    const id = Number(userId);
+
+    const myOffers = await this.offerRepository.find({
+      where: {
+        offerer_user_id: id,
+        status: In([OfferStatus.PENDING, OfferStatus.ACCEPTED]),
+      },
+      relations: ['user', 'offerWallet', 'offerWallet.sticker', 'requestSticker'],
+      order: { date_created: 'DESC' },
+    });
+
+    const myAcceptedExchanges = await this.exchangeRepository.find({
+      where: { accepter_user_id: id },
+      relations: [
+        'offer',
+        'offer.user',
+        'offer.offerWallet',
+        'offer.offerWallet.sticker',
+        'offer.requestSticker',
+      ],
+      order: { date_completed: 'DESC' },
+    });
+
+    const acceptedOffers = myAcceptedExchanges
+      .map((exchange) => exchange.offer)
+      .filter((offer): offer is Offer => Boolean(offer));
+
+    const myRejections = await this.offerRejectionRepository.find({
+      where: { user_id: id },
+    });
+
+    const rejectedOfferIds = myRejections.map((rejection) => rejection.offer_id);
+
+    const rejectedOffers = rejectedOfferIds.length
+      ? await this.offerRepository.find({
+          where: { id: In(rejectedOfferIds) },
+          relations: ['user', 'offerWallet', 'offerWallet.sticker', 'requestSticker'],
+        })
+      : [];
+
+    const combined = new Map<number, any>();
+
+    for (const offer of myOffers) {
+      combined.set(offer.id, this.mapOfferToHistoryItem(offer, id, 'offerer'));
+    }
+
+    for (const offer of rejectedOffers) {
+      combined.set(offer.id, this.mapOfferToHistoryItem(offer, id, 'rejecter'));
+    }
+
+    for (const offer of acceptedOffers) {
+      combined.set(offer.id, this.mapOfferToHistoryItem(offer, id, 'accepter'));
+    }
+
+    return Array.from(combined.values()).sort((a, b) => {
+      return new Date(b.date_created).getTime() - new Date(a.date_created).getTime();
+    });
+  }
+
+  private mapOfferToHistoryItem(
+    offer: Offer,
+    userId: number,
+    role: 'offerer' | 'accepter' | 'rejecter',
+  ) {
+    return {
+      id: offer.id,
+      offered_quantity: offer.offered_quantity,
+      request_quantity: offer.request_quantity,
+      // Para "rejecter" mostramos el estado desde la perspectiva del usuario
+      // (la oferta real puede seguir "pending" para otros), no su status global.
+      status: role === 'rejecter' ? OfferStatus.REJECTED : offer.status,
+      date_created: offer.date_created,
+      date_expires: offer.date_expires,
+      isMine: offer.offerer_user_id === userId,
+      role,
+      offererUser: {
+        id: offer.user.id,
+        first_name: offer.user.first_name,
+        last_name: offer.user.last_name,
+      },
+      offerWallet: offer.offerWallet,
+      requestSticker: offer.requestSticker,
+    };
   }
 
   async findOne(id: number): Promise<Offer> {
