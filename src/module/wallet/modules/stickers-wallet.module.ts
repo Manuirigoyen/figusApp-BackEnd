@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { StickersWallet } from "../entities/stickers-wallet.entity";
+import { Offer } from "../../offers/entities/offer.entity";
+import { Exchange } from "../../exchanges/entities/exchanges.entity";
 import { StickersWalletController } from "./../controllers/stickers-wallet.controller";
 import { StickersWalletService } from "./../services/stickers-wallet.service";
 
@@ -13,11 +15,11 @@ import { StickersWalletService } from "./../services/stickers-wallet.service";
 @Module({
   imports: [
     /**
-     * Registro de la entidad StickersWallet.
-     * * Permite que el repositorio de TypeORM esté disponible para inyección
+     * Registro de las entidades StickersWallet, Offer y Exchange.
+     * * Permite que los repositorios de TypeORM estén disponibles para inyección
      * dentro de los servicios de este módulo.
      */
-    TypeOrmModule.forFeature([StickersWallet]),
+    TypeOrmModule.forFeature([StickersWallet, Offer, Exchange]),
   ],
   controllers: [StickersWalletController],
   providers: [StickersWalletService],
