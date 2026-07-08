@@ -66,7 +66,17 @@ export class SpinsWalletController {
   }
 
   /**
-   * Obtiene la billetera de giros por ID.
+   * Obtiene la billetera de giros por user_id.
+   * Debe ir antes de :id para que Nest no lo interprete como un id numérico.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get("user/:userId")
+  findByUser(@Param("userId", ParseIntPipe) userId: number) {
+    return this.spinsWalletService.findByUser(userId);
+  }
+
+  /**
+   * Obtiene la billetera de giros por ID de fila.
    */
   @Get(":id")
   findOne(@Param("id", ParseIntPipe) id: number) {

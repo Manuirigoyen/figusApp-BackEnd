@@ -182,6 +182,28 @@ export class SpinsWalletService {
   }
 
 
+  /**
+   * Obtiene la billetera de giros de un usuario por su user_id.
+   */
+  async findByUser(userId: number): Promise<SpinsWallet> {
+
+    const wallet =
+      await this.spinsWalletRepository.findOne({
+        where: {
+          user_id: userId,
+        },
+      });
+
+    if (!wallet) {
+      throw new NotFoundException(
+        `SpinsWallet #${userId} not found`,
+      );
+    }
+
+    return wallet;
+  }
+
+
   async update(
     id: number,
     updateSpinsWalletDto: UpdateSpinsWalletDto,
