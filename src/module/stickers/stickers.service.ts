@@ -27,22 +27,57 @@ export class StickersService {
     return await this.stickersRepository.save(sticker);
   }
 
+  /**
+   * Resuelve el cover_image de un sticker a una URL utilizable por el frontend.
+   */
+  private async resolveStickerImage(sticker: Sticker): Promise<Sticker> {
+    const [cover_image] = await this.uploadsService.resolveManyImageUrls([
+      sticker.cover_image,
+    ]);
+
+    return { ...sticker, cover_image };
+  }
+
+  /**
+   * Resuelve el cover_image de una lista de stickers en un solo lote.
+   */
+  private async resolveStickerImages(stickers: Sticker[]): Promise<Sticker[]> {
+    const resolvedCovers = await this.uploadsService.resolveManyImageUrls(
+      stickers.map((sticker) => sticker.cover_image),
+    );
+
+    return stickers.map((sticker, index) => ({
+      ...sticker,
+      cover_image: resolvedCovers[index],
+    }));
+  }
+
   async findAll(): Promise<Sticker[]> {
-    return this.stickersRepository.find({ relations: { album: true } });
+    const stickers = await this.stickersRepository.find({
+      relations: { album: true },
+    });
+
+    return this.resolveStickerImages(stickers);
   }
 
   async findOne(id: number): Promise<Sticker | null> {
-    return this.stickersRepository.findOne({
+    const sticker = await this.stickersRepository.findOne({
       where: { id },
       relations: { album: true },
     });
+
+    if (!sticker) return null;
+
+    return this.resolveStickerImage(sticker);
   }
 
   async findByAlbum(albumId: number): Promise<Sticker[]> {
-    return this.stickersRepository.find({
+    const stickers = await this.stickersRepository.find({
       where: { album_id: albumId },
       relations: { album: true },
     });
+
+    return this.resolveStickerImages(stickers);
   }
 
   async update(id: number, updateStickerDto: UpdateStickerDto): Promise<Sticker | null> {

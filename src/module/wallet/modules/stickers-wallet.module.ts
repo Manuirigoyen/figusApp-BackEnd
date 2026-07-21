@@ -5,6 +5,7 @@ import { Offer } from "../../offers/entities/offer.entity";
 import { Exchange } from "../../exchanges/entities/exchanges.entity";
 import { StickersWalletController } from "./../controllers/stickers-wallet.controller";
 import { StickersWalletService } from "./../services/stickers-wallet.service";
+import { UploadsModule } from "../../uploads/uploads.module";
 
 /**
  * Módulo de Billetera de Stickers (StickersWalletModule).
@@ -20,6 +21,7 @@ import { StickersWalletService } from "./../services/stickers-wallet.service";
      * dentro de los servicios de este módulo.
      */
     TypeOrmModule.forFeature([StickersWallet, Offer, Exchange]),
+    UploadsModule,
   ],
   controllers: [StickersWalletController],
   providers: [StickersWalletService],

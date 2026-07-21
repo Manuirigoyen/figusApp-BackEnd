@@ -6,6 +6,7 @@ import { UpdateStickersWalletDto } from "./../dto/update-stickers-wallet.dto";
 import { StickersWallet } from "./../entities/stickers-wallet.entity";
 import { Offer, OfferStatus } from "../../offers/entities/offer.entity";
 import { Exchange } from "../../exchanges/entities/exchanges.entity";
+import { UploadsService } from "../../uploads/uploads.service";
 
 /**
  * Servicio de Billetera de Stickers (StickersWalletService).
@@ -23,7 +24,34 @@ export class StickersWalletService {
 
     @InjectRepository(Exchange)
     private readonly exchangeRepository: Repository<Exchange>,
+
+    private readonly uploadsService: UploadsService,
   ) {}
+
+  /**
+   * Resuelve las URLs de imagen (cover_image) de los stickers relacionados
+   * a una lista de registros de billetera, devolviendo copias nuevas de los
+   * objetos con el campo ya listo para el frontend.
+   */
+  private async resolveWalletImages(
+    wallets: StickersWallet[],
+  ): Promise<StickersWallet[]> {
+    const resolvedCovers = await this.uploadsService.resolveManyImageUrls(
+      wallets.map((wallet) => wallet.sticker?.cover_image ?? null),
+    );
+
+    return wallets.map((wallet, index) => {
+      if (!wallet.sticker) return wallet;
+
+      return {
+        ...wallet,
+        sticker: {
+          ...wallet.sticker,
+          cover_image: resolvedCovers[index],
+        },
+      };
+    });
+  }
 
   /**
    * Agrega un nuevo registro de figurita a la billetera de un usuario.
@@ -42,18 +70,20 @@ export class StickersWalletService {
   /**
    * Obtiene todos los ítems de billeteras existentes con sus relaciones.
    */
-  findAll(): Promise<StickersWallet[]> {
-    return this.stickersWalletRepository.find({
+  async findAll(): Promise<StickersWallet[]> {
+    const wallets = await this.stickersWalletRepository.find({
       relations: { sticker: true },
     });
+
+    return this.resolveWalletImages(wallets);
   }
 
   /**
    * Obtiene todas las figuritas pertenecientes a un usuario específico.
    * * @param userId ID del usuario.
    */
-  findByUser(userId: number): Promise<StickersWallet[]> {
-    return this.stickersWalletRepository.find({
+  async findByUser(userId: number): Promise<StickersWallet[]> {
+    const wallets = await this.stickersWalletRepository.find({
       where: {
         user: { id: userId },
       },
@@ -61,6 +91,8 @@ export class StickersWalletService {
         sticker: true,
       },
     });
+
+    return this.resolveWalletImages(wallets);
   }
 
   /**
@@ -77,7 +109,8 @@ export class StickersWalletService {
       throw new NotFoundException(`StickersWallet with ID ${id} not found`);
     }
 
-    return wallet;
+    const [resolved] = await this.resolveWalletImages([wallet]);
+    return resolved;
   }
 
   /**
@@ -109,6 +142,52 @@ export class StickersWalletService {
         'No podés eliminar esta figurita porque tiene un intercambio activo. Cancelá la oferta primero.',
       );
     }
+  }
+
+  /**
+   * Copia el sticker ofrecido a columnas denormalizadas antes de anular
+   * offer_wallet_id, para que el historial conserve el nombre.
+   */
+  private async preserveOfferStickerSnapshot(walletId: number): Promise<void> {
+    const wallet = await this.stickersWalletRepository.findOne({
+      where: { id: walletId },
+      relations: { sticker: true },
+    });
+
+    if (!wallet?.sticker) return;
+
+    await this.offerRepository
+      .createQueryBuilder()
+      .update()
+      .set({
+        offered_sticker_id: wallet.sticker.id,
+        offered_sticker_name: wallet.sticker.name,
+      })
+      .where('offer_wallet_id = :walletId', { walletId })
+      .andWhere('(offered_sticker_id IS NULL OR offered_sticker_name IS NULL)')
+      .execute();
+
+    await this.exchangeRepository
+      .createQueryBuilder()
+      .update()
+      .set({
+        offered_sticker_id: wallet.sticker.id,
+        offered_sticker_name: wallet.sticker.name,
+      })
+      .where('offered_wallet_id = :walletId', { walletId })
+      .andWhere('(offered_sticker_id IS NULL OR offered_sticker_name IS NULL)')
+      .execute();
+
+    await this.exchangeRepository
+      .createQueryBuilder()
+      .update()
+      .set({
+        received_sticker_id: wallet.sticker.id,
+        received_sticker_name: wallet.sticker.name,
+      })
+      .where('received_wallet_id = :walletId', { walletId })
+      .andWhere('(received_sticker_id IS NULL OR received_sticker_name IS NULL)')
+      .execute();
   }
 
   /**
@@ -179,6 +258,7 @@ export class StickersWalletService {
     }
 
     await this.checkActiveOffer(id);
+    await this.preserveOfferStickerSnapshot(id);
     await this.nullifyWalletRefs(id);
     await this.stickersWalletRepository.delete(id);
   }
@@ -189,6 +269,7 @@ export class StickersWalletService {
   async remove(id: number): Promise<void> {
     await this.findOne(id);
     await this.checkActiveOffer(id);
+    await this.preserveOfferStickerSnapshot(id);
     await this.nullifyWalletRefs(id);
     await this.stickersWalletRepository.delete(id);
   }

@@ -16,6 +16,7 @@ import { Exchange, ExchangeStatus } from '../exchanges/entities/exchanges.entity
 import { StickersWallet } from '../wallet/entities/stickers-wallet.entity';
 import { Sticker } from '../stickers/entities/sticker.entity';
 import { UserAlbumSticker } from '../albums/entities/user-album-sticker.entity';
+import { UploadsService } from '../uploads/uploads.service';
 
 @Injectable()
 export class OffersService {
@@ -36,7 +37,47 @@ export class OffersService {
     private readonly exchangeRepository: Repository<Exchange>,
 
     private readonly dataSource: DataSource,
+
+    private readonly uploadsService: UploadsService,
   ) {}
+
+  /**
+   * Resuelve en lote las imágenes de la figurita ofrecida (offerWallet.sticker)
+   * y la figurita solicitada (requestSticker) para una lista de ofertas/items
+   * ya mapeados hacia el frontend, sin mutar los objetos originales.
+   */
+  private async resolveOfferListImages<
+    T extends { offerWallet?: StickersWallet | null; requestSticker?: Sticker | null },
+  >(items: T[]): Promise<T[]> {
+    const covers: Array<string | null | undefined> = [];
+
+    items.forEach((item) => {
+      covers.push(item.offerWallet?.sticker?.cover_image ?? null);
+      covers.push(item.requestSticker?.cover_image ?? null);
+    });
+
+    const resolved = await this.uploadsService.resolveManyImageUrls(covers);
+
+    return items.map((item, index) => {
+      const offerCover = resolved[index * 2];
+      const requestCover = resolved[index * 2 + 1];
+
+      return {
+        ...item,
+        offerWallet: item.offerWallet
+          ? {
+              ...item.offerWallet,
+              sticker: item.offerWallet.sticker
+                ? { ...item.offerWallet.sticker, cover_image: offerCover }
+                : item.offerWallet.sticker,
+            }
+          : item.offerWallet,
+        requestSticker: item.requestSticker
+          ? { ...item.requestSticker, cover_image: requestCover }
+          : item.requestSticker,
+      };
+    });
+  }
 
   async create(createOfferDto: CreateOfferDto, userId: number): Promise<Offer> {
     const offerWalletId = Number(createOfferDto.offer_wallet_id);
@@ -82,10 +123,13 @@ export class OffersService {
     const offer = this.offerRepository.create({
       offerer_user_id: Number(userId),
       offer_wallet_id: offerWalletId,
+      offered_sticker_id: offerWallet.sticker.id,
+      offered_sticker_name: offerWallet.sticker.name,
       offered_quantity: offeredQuantity,
       offered: OfferType.STICKER,
       request: OfferType.STICKER,
       request_sticker_id: requestStickerId,
+      request_sticker_name: requestSticker.name,
       request_quantity: requestQuantity,
       status: OfferStatus.PENDING,
       date_expires: dateExpires,
@@ -126,6 +170,7 @@ export class OffersService {
         'user',
         'offerWallet',
         'offerWallet.sticker',
+        'offeredSticker',
         'requestSticker',
       ],
       order: {
@@ -133,7 +178,7 @@ export class OffersService {
       },
     });
 
-    return offers
+    const mapped = offers
       .filter((offer) => !rejectedOfferIds.includes(offer.id))
       .map((offer) => ({
         id: offer.id,
@@ -148,7 +193,11 @@ export class OffersService {
         },
         offerWallet: offer.offerWallet,
         requestSticker: offer.requestSticker,
+        offered_sticker_name: this.resolveOfferedStickerName(offer),
+        request_sticker_name: this.resolveRequestStickerName(offer),
       }));
+
+    return this.resolveOfferListImages(mapped);
   }
 
   /**
@@ -170,7 +219,7 @@ export class OffersService {
         offerer_user_id: id,
         status: In([OfferStatus.PENDING, OfferStatus.ACCEPTED]),
       },
-      relations: ['user', 'offerWallet', 'offerWallet.sticker', 'requestSticker'],
+      relations: ['user', 'offerWallet', 'offerWallet.sticker', 'offeredSticker', 'requestSticker'],
       order: { date_created: 'DESC' },
     });
 
@@ -181,10 +230,43 @@ export class OffersService {
         'offer.user',
         'offer.offerWallet',
         'offer.offerWallet.sticker',
+        'offer.offeredSticker',
         'offer.requestSticker',
+        'offeredWallet',
+        'offeredWallet.sticker',
+        'offeredSticker',
+        'receivedWallet',
+        'receivedWallet.sticker',
+        'receivedSticker',
       ],
       order: { date_completed: 'DESC' },
     });
+
+    const myOfferedExchanges = await this.exchangeRepository.find({
+      where: { offer: { offerer_user_id: id } },
+      relations: [
+        'offer',
+        'offer.user',
+        'offer.offerWallet',
+        'offer.offerWallet.sticker',
+        'offer.offeredSticker',
+        'offer.requestSticker',
+        'offeredWallet',
+        'offeredWallet.sticker',
+        'offeredSticker',
+        'receivedWallet',
+        'receivedWallet.sticker',
+        'receivedSticker',
+      ],
+      order: { date_completed: 'DESC' },
+    });
+
+    const exchangeByOfferId = new Map<number, Exchange>();
+    for (const exchange of [...myAcceptedExchanges, ...myOfferedExchanges]) {
+      if (exchange.offer_id) {
+        exchangeByOfferId.set(exchange.offer_id, exchange);
+      }
+    }
 
     const acceptedOffers = myAcceptedExchanges
       .map((exchange) => exchange.offer)
@@ -199,14 +281,17 @@ export class OffersService {
     const rejectedOffers = rejectedOfferIds.length
       ? await this.offerRepository.find({
           where: { id: In(rejectedOfferIds) },
-          relations: ['user', 'offerWallet', 'offerWallet.sticker', 'requestSticker'],
+          relations: ['user', 'offerWallet', 'offerWallet.sticker', 'offeredSticker', 'requestSticker'],
         })
       : [];
 
     const combined = new Map<number, any>();
 
     for (const offer of myOffers) {
-      combined.set(offer.id, this.mapOfferToHistoryItem(offer, id, 'offerer'));
+      combined.set(
+        offer.id,
+        this.mapOfferToHistoryItem(offer, id, 'offerer', exchangeByOfferId.get(offer.id)),
+      );
     }
 
     for (const offer of rejectedOffers) {
@@ -214,10 +299,17 @@ export class OffersService {
     }
 
     for (const offer of acceptedOffers) {
-      combined.set(offer.id, this.mapOfferToHistoryItem(offer, id, 'accepter'));
+      combined.set(
+        offer.id,
+        this.mapOfferToHistoryItem(offer, id, 'accepter', exchangeByOfferId.get(offer.id)),
+      );
     }
 
-    return Array.from(combined.values()).sort((a, b) => {
+    const historyItems = await this.resolveOfferListImages(
+      Array.from(combined.values()),
+    );
+
+    return historyItems.sort((a, b) => {
       return new Date(b.date_created).getTime() - new Date(a.date_created).getTime();
     });
   }
@@ -226,6 +318,7 @@ export class OffersService {
     offer: Offer,
     userId: number,
     role: 'offerer' | 'accepter' | 'rejecter',
+    exchange?: Exchange,
   ) {
     return {
       id: offer.id,
@@ -245,7 +338,38 @@ export class OffersService {
       },
       offerWallet: offer.offerWallet,
       requestSticker: offer.requestSticker,
+      offered_sticker_name: this.resolveOfferedStickerName(offer, exchange),
+      request_sticker_name: this.resolveRequestStickerName(offer, exchange),
     };
+  }
+
+  private resolveOfferedStickerName(
+    offer: Offer,
+    exchange?: Exchange,
+  ): string | null {
+    return (
+      offer.offered_sticker_name ??
+      exchange?.offered_sticker_name ??
+      offer.offerWallet?.sticker?.name ??
+      exchange?.offeredWallet?.sticker?.name ??
+      offer.offeredSticker?.name ??
+      exchange?.offeredSticker?.name ??
+      null
+    );
+  }
+
+  private resolveRequestStickerName(
+    offer: Offer,
+    exchange?: Exchange,
+  ): string | null {
+    return (
+      offer.request_sticker_name ??
+      exchange?.received_sticker_name ??
+      offer.requestSticker?.name ??
+      exchange?.receivedWallet?.sticker?.name ??
+      exchange?.receivedSticker?.name ??
+      null
+    );
   }
 
   async findOne(id: number): Promise<Offer> {
@@ -377,6 +501,15 @@ export class OffersService {
       );
 
       offer.status = OfferStatus.ACCEPTED;
+      if (!offer.offered_sticker_id) {
+        offer.offered_sticker_id = offer.offerWallet.sticker.id;
+      }
+      if (!offer.offered_sticker_name) {
+        offer.offered_sticker_name = offer.offerWallet.sticker.name;
+      }
+      if (!offer.request_sticker_name && offer.requestSticker) {
+        offer.request_sticker_name = offer.requestSticker.name;
+      }
       await manager.save(offer);
 
       const exchange = manager.create(Exchange, {
@@ -388,6 +521,10 @@ export class OffersService {
         status: ExchangeStatus.COMPLETED,
         offeredWallet: offer.offerWallet,
         receivedWallet: accepterDemandWallet,
+        offered_sticker_id: offer.offerWallet.sticker.id,
+        offered_sticker_name: offer.offerWallet.sticker.name,
+        received_sticker_id: offer.requestSticker.id,
+        received_sticker_name: offer.requestSticker.name,
       });
 
       return manager.save(exchange);
@@ -473,7 +610,7 @@ export class OffersService {
         status: OfferStatus.PENDING,
         date_expires: LessThan(tomorrow),
       },
-      relations: ['user', 'offerWallet', 'offerWallet.sticker', 'requestSticker'],
+      relations: ['user', 'offerWallet', 'offerWallet.sticker', 'offeredSticker', 'requestSticker'],
       order: { date_created: 'DESC' },
     });
   }

@@ -127,10 +127,23 @@ export class AlbumsService {
       where: { user_id: userId, album_id: albumId },
     });
 
+    // Resolvemos en un solo llamado (batch) las URLs reales de Supabase Storage
+    // para la portada del álbum + todas las figuritas, en vez de devolver el
+    // path crudo guardado en la DB (que puede ser una ruta legacy inválida).
+    const [resolvedAlbumCover, ...resolvedStickerCovers] =
+      await this.uploadsService.resolveManyImageUrls([
+        album.cover_image,
+        ...stickers.map((sticker) => sticker.cover_image),
+      ]);
+
     return {
-      album,
-      stickers: stickers.map((sticker) => ({
+      album: {
+        ...album,
+        cover_image: resolvedAlbumCover,
+      },
+      stickers: stickers.map((sticker, index) => ({
         ...sticker,
+        cover_image: resolvedStickerCovers[index],
         obtained: obtainedStickerIds.includes(sticker.id),
       })),
       progress: {

@@ -37,6 +37,14 @@ export class Offer {
   @Column({ nullable: true })
   offer_wallet_id!: number;
 
+  /** Figurita ofrecida (independiente del wallet, para historial). */
+  @Column({ nullable: true })
+  offered_sticker_id!: number;
+
+  /** Nombre denormalizado para preservar historial si se elimina el wallet. */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  offered_sticker_name!: string;
+
   @Column()
   offered_quantity!: number;
 
@@ -49,6 +57,10 @@ export class Offer {
 
   @Column({ nullable: true })
   request_sticker_id!: number;
+
+  /** Nombre denormalizado de la figurita solicitada. */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  request_sticker_name!: string;
 
   @Column({
     type: 'enum',
@@ -82,6 +94,10 @@ export class Offer {
   })
   @JoinColumn({ name: 'offer_wallet_id' })
   offerWallet!: StickersWallet;
+
+  @ManyToOne(() => Sticker, { nullable: true })
+  @JoinColumn({ name: 'offered_sticker_id' })
+  offeredSticker!: Sticker;
 
   @ManyToOne(() => Sticker, { nullable: true })
   @JoinColumn({ name: 'request_sticker_id' })

@@ -10,6 +10,7 @@ import { StickersWallet } from '../wallet/entities/stickers-wallet.entity';
 import { Sticker } from '../stickers/entities/sticker.entity';
 import { Exchange } from '../exchanges/entities/exchanges.entity';
 import { UserAlbumSticker } from '../albums/entities/user-album-sticker.entity';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UserAlbumSticker } from '../albums/entities/user-album-sticker.entity';
       Exchange,
       UserAlbumSticker,
     ]),
+    UploadsModule,
   ],
   controllers: [OffersController],
   providers: [OffersService],

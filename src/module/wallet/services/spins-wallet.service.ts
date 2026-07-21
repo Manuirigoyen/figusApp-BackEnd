@@ -4,11 +4,12 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, DataSource } from "typeorm";
+import { Repository, DataSource, In } from "typeorm";
 
 import { CreateSpinsWalletDto } from "./../dto/create-spins-wallet.dto";
 import { UpdateSpinsWalletDto } from "./../dto/update-spins-wallet.dto";
 import { SpinsWallet } from "./../entities/spins-wallet.entity";
+import { PacksWallet } from "./../entities/packs-wallet.entity";
 import { Prize } from "../../prize/entities/prize.entity";
 import { Pack } from "../../packs/entities/pack.entity";
 import { PacksWalletService } from "./packs-wallet.service";
@@ -82,37 +83,62 @@ export class SpinsWalletService {
         prizeObtained.id_packs_bronce,
         prizeObtained.id_packs_plateado,
         prizeObtained.id_packs_dorado,
-      ];
+      ].filter((packId): packId is number => Boolean(packId));
 
+      if (packsAcreditados.length > 0) {
+        const uniquePackIds = Array.from(new Set(packsAcreditados));
 
-      for (const packId of packsAcreditados) {
+        // 1 sola consulta para validar que todos los packs existen
+        // (antes era 1 findOne por pack, en serie).
+        const existingPacks = await queryRunner.manager.find(Pack, {
+          where: { id: In(uniquePackIds) },
+        });
 
-        if (!packId) {
-          continue;
+        const existingPackIds = new Set(existingPacks.map((pack) => pack.id));
+
+        for (const packId of uniquePackIds) {
+          if (!existingPackIds.has(packId)) {
+            throw new NotFoundException(`El pack ${packId} no existe`);
+          }
         }
 
-
-        const packExists =
-          await queryRunner.manager.findOne(Pack, {
+        // 1 sola consulta para traer de una todas las billeteras de pack
+        // que el usuario ya tenga (antes era 1 findOne por pack, en serie).
+        const existingWalletItems = await queryRunner.manager.find(
+          PacksWallet,
+          {
             where: {
-              id: packId,
+              user_id: userId,
+              pack_id: In(uniquePackIds),
             },
-          });
+          },
+        );
 
+        const walletByPackId = new Map(
+          existingWalletItems.map((item) => [item.pack_id, item]),
+        );
 
-        if (!packExists) {
-          throw new NotFoundException(
-            `El pack ${packId} no existe`,
-          );
+        const walletItemsToSave: PacksWallet[] = [];
+
+        for (const packId of packsAcreditados) {
+          const existing = walletByPackId.get(packId);
+
+          if (existing) {
+            existing.stock = Number(existing.stock) + 1;
+            walletItemsToSave.push(existing);
+          } else {
+            const created = queryRunner.manager.create(PacksWallet, {
+              user_id: userId,
+              pack_id: packId,
+              stock: 1,
+            });
+
+            walletByPackId.set(packId, created);
+            walletItemsToSave.push(created);
+          }
         }
 
-
-        await this.packsWalletService.creditPack(
-          userId,
-          packId,
-          1,
-          queryRunner.manager,
-        );
+        await queryRunner.manager.save(PacksWallet, walletItemsToSave);
       }
 
 

@@ -66,6 +66,125 @@ export class UploadsService {
   }
 
   /**
+   * Normaliza un valor de cover_image guardado en la base de datos (que puede
+   * venir con prefijos legacy como "/uploads/private/" o "/uploads/") a la
+   * key real que espera el bucket de Supabase Storage.
+   * @param storedPath Valor crudo tal como está guardado en la DB.
+   */
+  private normalizeStorageKey(storedPath: string): string {
+    return storedPath
+      .replace(/^\/?uploads\/(private\/|public\/)?/, '')
+      .replace(/^\/+/, '');
+  }
+
+  /**
+   * Si la URL recibida es en realidad un link firmado viejo de NUESTRO propio
+   * proyecto de Supabase (ej: guardado a mano en la DB alguna vez desde el
+   * dashboard), devuelve la key real del objeto para poder volver a firmarlo.
+   * Si es una URL externa genuina (otro dominio), devuelve null y se respeta
+   * tal cual.
+   * @param url URL absoluta a inspeccionar.
+   */
+  private extractSupabaseObjectKey(url: string): string | null {
+    try {
+      const supabaseHost = new URL(process.env.SUPABASE_URL!).host;
+      const parsed = new URL(url);
+
+      if (parsed.host !== supabaseHost) {
+        return null;
+      }
+
+      const match = parsed.pathname.match(
+        /\/storage\/v1\/object\/(?:sign|public|authenticated)\/(.+)$/,
+      );
+
+      if (!match) {
+        return null;
+      }
+
+      let objectPath = decodeURIComponent(match[1]);
+
+      // El path del objeto incluye el nombre del bucket como primer segmento
+      // (ej: "private/albums/1/3.png"), hay que sacarlo antes de re-firmar.
+      if (objectPath.startsWith(`${this.bucketName}/`)) {
+        objectPath = objectPath.slice(this.bucketName.length + 1);
+      }
+
+      return objectPath;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resuelve en lote una lista de valores de cover_image (de stickers, álbumes, etc.)
+   * a URLs firmadas y utilizables directamente por el frontend.
+   *
+   * - Si es una ruta/legacy path o una key de Supabase, se firma contra el bucket.
+   * - Si es un link http/https VIEJO de nuestro propio Supabase (por ejemplo
+   *   pegado a mano en la DB desde el dashboard), se re-firma de cero en vez
+   *   de reutilizar el token, que puede estar vencido.
+   * - Si es una URL absoluta realmente externa (otro dominio), se devuelve tal cual.
+   * - Si el archivo no existe o Supabase falla, se devuelve null para esa posición
+   *   (no rompe el resto de la respuesta ni tira una excepción).
+   *
+   * @param coverImages Lista de valores crudos (pueden incluir null/undefined).
+   * @returns Lista de URLs resueltas, en el mismo orden y largo que la entrada.
+   */
+  async resolveManyImageUrls(
+    coverImages: Array<string | null | undefined>,
+  ): Promise<Array<string | null>> {
+    const results: Array<string | null> = new Array(coverImages.length).fill(null);
+    const pending: { index: number; key: string }[] = [];
+
+    coverImages.forEach((coverImage, index) => {
+      if (!coverImage) return;
+
+      if (coverImage.startsWith('http')) {
+        const supabaseKey = this.extractSupabaseObjectKey(coverImage);
+
+        if (supabaseKey) {
+          // Es (o parece) un link firmado viejo de nuestro propio bucket:
+          // lo re-firmamos en vez de arriesgarnos a que el token ya venció.
+          pending.push({ index, key: supabaseKey });
+        } else {
+          // URL externa genuina (otro host): la respetamos tal cual.
+          results[index] = coverImage;
+        }
+        return;
+      }
+
+      pending.push({ index, key: this.normalizeStorageKey(coverImage) });
+    });
+
+    if (pending.length === 0) {
+      return results;
+    }
+
+    const { data, error } = await this.supabase.storage
+      .from(this.bucketName)
+      .createSignedUrls(
+        pending.map((item) => item.key),
+        3600,
+      );
+
+    // Si Supabase falla por completo, no rompemos la respuesta:
+    // simplemente esas imágenes quedan en null (mismo comportamiento que antes).
+    if (error || !data) {
+      return results;
+    }
+
+    data.forEach((item, i) => {
+      const { index } = pending[i];
+      if (!item.error && item.signedUrl) {
+        results[index] = item.signedUrl;
+      }
+    });
+
+    return results;
+  }
+
+  /**
    * Elimina un archivo específico del bucket.
    * @param path Ruta exacta del archivo.
    */

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   ParseIntPipe,
   Post,
@@ -71,6 +72,7 @@ export class SpinsWalletController {
    */
   @UseGuards(JwtAuthGuard)
   @Get("user/:userId")
+  @Header("Cache-Control", "no-store")
   findByUser(@Param("userId", ParseIntPipe) userId: number) {
     return this.spinsWalletService.findByUser(userId);
   }
