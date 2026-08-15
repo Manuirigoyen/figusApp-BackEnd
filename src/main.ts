@@ -15,7 +15,7 @@ async function bootstrap(): Promise<void> {
     origin: [
       "http://localhost:5173",
       // Dominio de producción fijo (no cambia entre deploys).
-      "https://figus-app-front-end.vercel.app",
+      "https://figus-play.vercel.app",
       // Acepta cualquier deploy preview del proyecto en Vercel.
       /^https:\/\/figus-app-front[a-z0-9-]*-manuelsas-projects\.vercel\.app$/,
     ],
